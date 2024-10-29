@@ -200,7 +200,14 @@ async def get_detail_table_organism_filters():
             "symbionts_raw_data_status": {
                 "terms": {"field": "symbionts_raw_data_status"}},
             "symbionts_assemblies_status": {
-                "terms": {"field": "symbionts_assemblies_status"}}}
+                "terms": {"field": "symbionts_assemblies_status"}},
+            "metagenomes_biosamples_status": {
+                "terms": {"field": "metagenomes_biosamples_status"}},
+            "metagenomes_raw_data_status": {
+                "terms": {"field": "metagenomes_raw_data_status"}},
+            "metagenomes_assemblies_status": {
+                "terms": {"field": "metagenomes_assemblies_status"}}
+        }
     }
 
     data = dict()
@@ -232,7 +239,14 @@ async def get_filters():
             "symbionts_raw_data_status": {
                 "terms": {"field": "symbionts_raw_data_status"}},
             "symbionts_assemblies_status": {
-                "terms": {"field": "symbionts_assemblies_status"}}}
+                "terms": {"field": "symbionts_assemblies_status"}},
+            "metagenomes_biosamples_status": {
+                "terms": {"field": "metagenomes_biosamples_status"}},
+            "metagenomes_raw_data_status": {
+                "terms": {"field": "metagenomes_raw_data_status"}},
+            "metagenomes_assemblies_status": {
+                "terms": {"field": "metagenomes_assemblies_status"}}
+        }
     }
 
     data = dict()
@@ -267,6 +281,21 @@ async def get_filters():
     result.append({
         'name': 'symbionts_assemblies_status',
         'doc_count': response['aggregations']['symbionts_assemblies_status'][
+            'buckets']
+    })
+    result.append({
+        'name': 'metagenomes_biosamples_status',
+        'doc_count': response['aggregations']['metagenomes_biosamples_status'][
+            'buckets']
+    })
+    result.append({
+        'name': 'metagenomes_raw_data_status',
+        'doc_count': response['aggregations']['metagenomes_raw_data_status'][
+            'buckets']
+    })
+    result.append({
+        'name': 'metagenomes_assemblies_status',
+        'doc_count': response['aggregations']['metagenomes_assemblies_status'][
             'buckets']
     })
     return result
@@ -411,7 +440,8 @@ async def root(index: str, offset: int = 0, limit: int = 15,
         # Ensure the body has a query structure in place
         body.setdefault("query", {"bool": {"must": {"bool": {"should": []}}}})
 
-        search_fields = ["organism", "commonName", "symbionts_records.organism.text"]
+        search_fields = ["organism", "commonName", "symbionts_records.organism.text",
+                         "metagenomes_records.organism.text"]
 
         for field in search_fields:
             body["query"]["bool"]["must"]["bool"]["should"].append({
