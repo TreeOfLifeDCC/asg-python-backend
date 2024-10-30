@@ -404,7 +404,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                 filter_name, filter_value = filter_item.split(":")
 
                 if filter_name == 'experimentType':
-
                     nested_dict = {
                         "nested": {
                             "path": "experiment",
@@ -436,17 +435,32 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                         {"term": {filter_name: filter_value}})
 
     # adding search string
+    # adding search string
     if search:
-        # Ensure the body has a query structure in place
-        body.setdefault("query", {"bool": {"must": {"bool": {"should": []}}}})
-
-        search_fields = ["organism", "commonName", "symbionts_records.organism.text",
-                         "metagenomes_records.organism.text"]
-
-        for field in search_fields:
-            body["query"]["bool"]["must"]["bool"]["should"].append({
-                "wildcard": {field: {"value": f"*{search}*", "case_insensitive": True}}
-            })
+        # body already has filter parameters
+        if "query" in body:
+            # body["query"]["bool"].update({"should": []})
+            body["query"]["bool"].update({"must": {}})
+        else:
+            # body["query"] = {"bool": {"should": []}}
+            body["query"] = {"bool": {"must": {}}}
+        body["query"]["bool"]["must"] = {"bool": {"should": []}}
+        body["query"]["bool"]["must"]["bool"]["should"].append(
+            {"wildcard": {"organism": {"value": f"*{search}*",
+                                       "case_insensitive": True}}}
+        )
+        body["query"]["bool"]["must"]["bool"]["should"].append(
+            {"wildcard": {"commonName": {"value": f"*{search}*",
+                                         "case_insensitive": True}}}
+        )
+        body["query"]["bool"]["must"]["bool"]["should"].append(
+            {"wildcard": {"symbionts_records.organism.text": {"value": f"*{search}*",
+                                                              "case_insensitive": True}}}
+        )
+        body["query"]["bool"]["must"]["bool"]["should"].append(
+            {"wildcard": {"metagenomes_records.organism.text": {"value": f"*{search}*",
+                                                                "case_insensitive": True}}}
+        )
 
     if action == 'download':
         response = await es.search(index=index, sort=sort, from_=offset, body=body, size=50000)
