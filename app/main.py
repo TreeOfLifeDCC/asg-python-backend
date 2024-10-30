@@ -435,7 +435,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                         {"term": {filter_name: filter_value}})
 
     # adding search string
-    # adding search string
     if search:
         # body already has filter parameters
         if "query" in body:
