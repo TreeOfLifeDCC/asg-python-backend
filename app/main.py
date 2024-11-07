@@ -200,7 +200,14 @@ async def get_detail_table_organism_filters():
             "symbionts_raw_data_status": {
                 "terms": {"field": "symbionts_raw_data_status"}},
             "symbionts_assemblies_status": {
-                "terms": {"field": "symbionts_assemblies_status"}}}
+                "terms": {"field": "symbionts_assemblies_status"}},
+            "metagenomes_biosamples_status": {
+                "terms": {"field": "metagenomes_biosamples_status"}},
+            "metagenomes_raw_data_status": {
+                "terms": {"field": "metagenomes_raw_data_status"}},
+            "metagenomes_assemblies_status": {
+                "terms": {"field": "metagenomes_assemblies_status"}}
+        }
     }
 
     data = dict()
@@ -232,7 +239,14 @@ async def get_filters():
             "symbionts_raw_data_status": {
                 "terms": {"field": "symbionts_raw_data_status"}},
             "symbionts_assemblies_status": {
-                "terms": {"field": "symbionts_assemblies_status"}}}
+                "terms": {"field": "symbionts_assemblies_status"}},
+            "metagenomes_biosamples_status": {
+                "terms": {"field": "metagenomes_biosamples_status"}},
+            "metagenomes_raw_data_status": {
+                "terms": {"field": "metagenomes_raw_data_status"}},
+            "metagenomes_assemblies_status": {
+                "terms": {"field": "metagenomes_assemblies_status"}}
+        }
     }
 
     data = dict()
@@ -244,7 +258,7 @@ async def get_filters():
         for name_bucket in entry['name']['buckets']:
             name = name_bucket['key']
             if name == 'annotation_complete' or name == 'biosamples' or name \
-                    == 'assemblies' or name == 'raw_data':
+                == 'assemblies' or name == 'raw_data':
                 for status_bucket in name_bucket['status']['buckets']:
                     status = status_bucket['key']
                     status_doc_count = status_bucket['doc_count']
@@ -269,12 +283,27 @@ async def get_filters():
         'doc_count': response['aggregations']['symbionts_assemblies_status'][
             'buckets']
     })
+    result.append({
+        'name': 'metagenomes_biosamples_status',
+        'doc_count': response['aggregations']['metagenomes_biosamples_status'][
+            'buckets']
+    })
+    result.append({
+        'name': 'metagenomes_raw_data_status',
+        'doc_count': response['aggregations']['metagenomes_raw_data_status'][
+            'buckets']
+    })
+    result.append({
+        'name': 'metagenomes_assemblies_status',
+        'doc_count': response['aggregations']['metagenomes_assemblies_status'][
+            'buckets']
+    })
     return result
 
 
 @app.get("/{index}")
 async def root(index: str, offset: int = 0, limit: int = 15,
-               sort: str = "currentStatus:asc", filter: str = None,
+               sort: str = None, filter: str = None,
                search: str = None, current_class: str = 'kingdom',
                phylogeny_filters: str = None, action: str = None):
     global value
@@ -375,7 +404,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                 filter_name, filter_value = filter_item.split(":")
 
                 if filter_name == 'experimentType':
-
                     nested_dict = {
                         "nested": {
                             "path": "experiment",
@@ -408,15 +436,40 @@ async def root(index: str, offset: int = 0, limit: int = 15,
 
     # adding search string
     if search:
-        # Ensure the body has a query structure in place
-        body.setdefault("query", {"bool": {"must": {"bool": {"should": []}}}})
+        if "query" not in body:
+            body["query"] = {"bool": {"must": {"bool": {"should": []}}}}
+        elif "must" not in body["query"]["bool"]:
+            body["query"]["bool"]["must"] = {"bool": {"should": []}}
 
-        search_fields = ["organism", "commonName", "symbionts_records.organism.text"]
+        search_fields = [
+            "organism",
+            "commonName",
+            "symbionts_records.organism.text",
+            "metagenomes_records.organism.text"
+        ]
 
-        for field in search_fields:
-            body["query"]["bool"]["must"]["bool"]["should"].append({
-                "wildcard": {field: {"value": f"*{search}*", "case_insensitive": True}}
-            })
+        wildcard_queries = [
+            {"wildcard": {field: {"value": f"*{search}*", "case_insensitive": True}}}
+            for field in search_fields
+        ]
+        body["query"]["bool"]["must"]["bool"]["should"].extend(wildcard_queries)
+
+        if index == "gis_filter_data":
+            # generate nested query for organisms.organism
+            nested_query = {
+                "nested": {
+                    "path": "organisms",
+                    "query": {
+                        "wildcard": {
+                            "organisms.organism": {
+                                "value": f"*{search}*",
+                                "case_insensitive": True
+                            }
+                        }
+                    }
+                }
+            }
+            body["query"]["bool"]["must"]["bool"]["should"].append(nested_query)
 
     if action == 'download':
         response = await es.search(index=index, sort=sort, from_=offset, body=body, size=50000)
@@ -483,7 +536,7 @@ async def get_data_files(item: QueryParam):
                       item.searchValue, item.currentClass,
                       item.phylogenyFilters, 'download')
 
-    csv_data = create_data_files_csv(data['results'], item.downloadOption)
+    csv_data = create_data_files_csv(data['results'], item.downloadOption, item.indexName)
 
     # Return the byte stream as a downloadable CSV file
     return StreamingResponse(
@@ -493,7 +546,7 @@ async def get_data_files(item: QueryParam):
     )
 
 
-def create_data_files_csv(results, download_option):
+def create_data_files_csv(results, download_option, index_name):
     header = []
     if download_option.lower() == "assemblies":
         header = ["Scientific Name", "Accession", "Version", "Assembly Name", "Assembly Description",
@@ -504,8 +557,12 @@ def create_data_files_csv(results, download_option):
     elif download_option.lower() == "raw_files":
         header = ["Study Accession", "Sample Accession", "Experiment Accession", "Run Accession", "Tax Id",
                   "Scientific Name", "FASTQ FTP", "Submitted FTP", "SRA FTP", "Library Construction Protocol"]
-    elif download_option.lower() == "metadata":
+    elif download_option.lower() == "metadata" and index_name == 'data_portal':
         header = ['Organism', 'Common Name', 'Common Name Source', 'Current Status']
+    elif download_option.lower() == "metadata" and index_name == 'tracking_status':
+        header = ['Organism', 'Common Name', 'Metadata submitted to BioSamples', 'Raw data submitted to ENA',
+                  'Mapped reads submitted to ENA', 'Assemblies submitted to ENA',
+                  'Annotation complete', 'Annotation submitted to ENA']
 
     output = io.StringIO()
     csv_writer = csv.writer(output)
@@ -562,12 +619,25 @@ def create_data_files_csv(results, download_option):
                              scientific_name, fastq_ftp, submitted_ftp, sra_ftp, library_construction_protocol]
                     csv_writer.writerow(entry)
 
-        elif download_option.lower() == "metadata":
+        elif download_option.lower() == "metadata" and index_name == 'data_portal':
             organism = record.get('organism', '')
             common_name = record.get('commonName', '')
             common_name_source = record.get('commonNameSource', '')
             current_status = record.get('currentStatus', '')
             entry = [organism, common_name, common_name_source, current_status]
+            csv_writer.writerow(entry)
+
+        elif download_option.lower() == "metadata" and index_name == 'tracking_status':
+            organism = record.get('organism', '')
+            common_name = record.get('commonName', '')
+            metadata_biosamples = record.get('biosamples', '')
+            raw_data_ena = record.get('raw_data', '')
+            mapped_reads_ena = record.get('mapped_reads', '')
+            assemblies_ena = record.get('assemblies_status', '')
+            annotation_complete = record.get('annotation_complete', '')
+            annotation_submitted_ena = record.get('annotation_status', '')
+            entry = [organism, common_name, metadata_biosamples, raw_data_ena, mapped_reads_ena, assemblies_ena,
+                     annotation_complete, annotation_submitted_ena]
             csv_writer.writerow(entry)
 
     output.seek(0)
