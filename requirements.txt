@@ -8,7 +8,9 @@ attrs==24.2.0
 certifi==2024.8.30
 charset-normalizer==2.0.12
 click==8.1.7
-elasticsearch==7.17.0
+elastic-transport==8.1.2
+elasticsearch==7.10.0
+elasticsearch-async==6.2.0
 exceptiongroup==1.2.2
 fastapi==0.73.0
 frozenlist==1.5.0
