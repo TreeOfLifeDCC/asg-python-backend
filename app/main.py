@@ -127,7 +127,7 @@ async def downloader_utility_data(taxonomy_filter: str, data_status: str,
     if project_name is not None and project_name != '':
         body["query"]["bool"]["filter"].append(
             {"term": {'project_name': project_name}})
-    print(body)
+
     response = await es.search(index="data_portal", from_=0, size=10000,
                                body=body)
     total_count = response['hits']['total']['value']
@@ -535,7 +535,7 @@ async def details(index: str, record_id: str):
     data = dict()
     data['count'] = response['hits']['total']['value']
     data['results'] = response['hits']['hits']
-    if index == 'data_portal':
+    if index in ['data_portal', 'data_portal_test']:
         data['aggregations'] = aggregations
     return data
 
@@ -585,7 +585,7 @@ def create_data_files_csv(results, download_option, index_name):
                   "Run Accession", "Tax Id",
                   "Scientific Name", "FASTQ FTP", "Submitted FTP", "SRA FTP",
                   "Library Construction Protocol"]
-    elif download_option.lower() == "metadata" and index_name == 'data_portal':
+    elif download_option.lower() == "metadata" and index_name in ['data_portal', 'data_portal_test']:
         header = ['Organism', 'Common Name', 'Common Name Source',
                   'Current Status']
     elif download_option.lower() == "metadata" and index_name == 'tracking_status':
@@ -660,7 +660,7 @@ def create_data_files_csv(results, download_option, index_name):
                              library_construction_protocol]
                     csv_writer.writerow(entry)
 
-        elif download_option.lower() == "metadata" and index_name == 'data_portal':
+        elif download_option.lower() == "metadata" and index_name in ['data_portal', 'data_portal_test']:
             organism = record.get('organism', '')
             common_name = record.get('commonName', '')
             common_name_source = record.get('commonNameSource', '')
