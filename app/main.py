@@ -1,14 +1,13 @@
 import csv
+import os
 import re
-from io import StringIO
-from typing import Optional
+
 from elasticsearch import AsyncElasticsearch, AIOHttpConnection
 from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import io
-import os
 
 import json
 
@@ -20,12 +19,16 @@ origins = [
     "*"
 ]
 
+# ES_HOST = os.getenv('ES_CONNECTION_URL')
+#
+# ES_USERNAME = os.getenv('ES_USERNAME')
+#
+# ES_PASSWORD = os.getenv('ES_PASSWORD')
 
-ES_HOST = os.getenv('ES_CONNECTION_URL')
+ES_HOST = 'https://prj-ext-dev-asg-gcp-dr-349815.es.europe-west2.gcp.elastic-cloud.com'
+ES_USERNAME = 'elastic'
+ES_PASSWORD = 'EAbKkM0E4Se8GfVgwxtKW6h0'
 
-ES_USERNAME = os.getenv('ES_USERNAME')
-
-ES_PASSWORD = os.getenv('ES_PASSWORD')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -259,7 +262,7 @@ async def get_filters():
         for name_bucket in entry['name']['buckets']:
             name = name_bucket['key']
             if name == 'annotation_complete' or name == 'biosamples' or name \
-                == 'assemblies' or name == 'raw_data':
+                    == 'assemblies' or name == 'raw_data':
                 for status_bucket in name_bucket['status']['buckets']:
                     status = status_bucket['key']
                     status_doc_count = status_bucket['doc_count']
@@ -336,7 +339,7 @@ async def root(index: str, offset: int = 0, limit: int = 15,
     }
     body["aggs"]["genome"] = {
         "nested": {"path": "genome_notes"},
-        "aggs": {"genome_count": {"cardinality": {"field": "genome_notes.id"}
+        "aggs": {"genome_count": {"terms": {"field": "genome_notes.url"}
                                   }
                  }
 
@@ -450,10 +453,12 @@ async def root(index: str, offset: int = 0, limit: int = 15,
         ]
 
         wildcard_queries = [
-            {"wildcard": {field: {"value": f"*{search}*", "case_insensitive": True}}}
+            {"wildcard": {
+                field: {"value": f"*{search}*", "case_insensitive": True}}}
             for field in search_fields
         ]
-        body["query"]["bool"]["must"]["bool"]["should"].extend(wildcard_queries)
+        body["query"]["bool"]["must"]["bool"]["should"].extend(
+            wildcard_queries)
 
         if index == "gis_filter_data":
             # generate nested query for organisms.organism
@@ -470,12 +475,15 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                     }
                 }
             }
-            body["query"]["bool"]["must"]["bool"]["should"].append(nested_query)
-
+            body["query"]["bool"]["must"]["bool"]["should"].append(
+                nested_query)
+    print(json.dumps(body))
     if action == 'download':
-        response = await es.search(index=index, sort=sort, from_=offset, body=body, size=50000)
+        response = await es.search(index=index, sort=sort, from_=offset,
+                                   body=body, size=50000)
     else:
-        response = await es.search(index=index, sort=sort, from_=offset, size=limit, body=body)
+        response = await es.search(index=index, sort=sort, from_=offset,
+                                   size=limit, body=body)
 
     data = dict()
     data['count'] = response['hits']['total']['value']
@@ -486,26 +494,73 @@ async def root(index: str, offset: int = 0, limit: int = 15,
 
 @app.get("/{index}/{record_id}")
 async def details(index: str, record_id: str):
+    global aggregations
     body = dict()
-    if index == 'data_portal':
+    if index == 'data_portal_test':
         body["query"] = {
             "bool": {"filter": [{'term': {'organism': record_id}}]}}
-        body["aggregations"] = {'filters': {'nested': {'path': 'records'},
-                                            "aggs": {
-                                                'sex_filter': {'terms': {
-                                                    'field': 'records.sex',
-                                                    'size': 2000}},
-                                                'tracking_status_filter': {
-                                                    'terms': {
-                                                        'field': 'records'
-                                                                 '.trackingSystem',
-                                                        'size': 2000}},
-                                                'organism_part_filter': {
-                                                    'terms': {
-                                                        'field': 'records'
-                                                                 '.organismPart',
-                                                        'size': 2000}}
-                                            }}}
+        body["aggs"] = dict()
+        body["aggs"]["metadata_filters"] = {
+            'nested': {'path': 'records'},
+            "aggs": {
+                'sex_filter': {
+                    'terms': {
+                        'field':
+                            'records.sex.keyword',
+                        'size': 2000}},
+                'tracking_status_filter': {
+                    'terms': {
+                        'field':
+                            'records.'
+                            'trackingSystem.keyword',
+                        'size': 2000}},
+                'organism_part_filter': {
+                    'terms': {
+                        'field': 'records'
+                                 '.organismPart.keyword',
+                        'size': 2000}}
+            }}
+        body["aggs"]["symbionts_filters"] = {
+            'nested': {'path': 'symbionts_records'},
+            "aggs": {
+                'sex_filter': {
+                    'terms': {
+                        'field':
+                            'symbionts_records.sex.keyword',
+                        'size': 2000}},
+                'tracking_status_filter': {
+                    'terms': {
+                        'field':
+                            'symbionts_records.'
+                            'trackingSystem.keyword',
+                        'size': 2000}},
+                'organism_part_filter': {
+                    'terms': {
+                        'field': 'symbionts_records'
+                                 '.organismPart.keyword',
+                        'size': 2000}}
+            }}
+        body['aggs']['metagenomes_filters'] = {
+            'nested': {'path': 'metagenomes_records'},
+            "aggs": {
+                'sex_filter': {
+                    'terms': {
+                        'field':
+                            'metagenomes_records.sex.keyword',
+                        'size': 2000}},
+                'tracking_status_filter': {
+                    'terms': {
+                        'field':
+                            'metagenomes_records.'
+                            'trackingSystem.keyword',
+                        'size': 2000}},
+                'organism_part_filter': {
+                    'terms': {
+                        'field': 'metagenomes_records'
+                                 '.organismPart.keyword',
+                        'size': 2000}}
+            }}
+        print(json.dumps(body))
         response = await es.search(index=index, body=body)
         aggregations = response['aggregations']
     else:
@@ -513,7 +568,7 @@ async def details(index: str, record_id: str):
     data = dict()
     data['count'] = response['hits']['total']['value']
     data['results'] = response['hits']['hits']
-    if index == 'data_portal':
+    if index == 'data_portal_test':
         data['aggregations'] = aggregations
     return data
 
@@ -537,7 +592,8 @@ async def get_data_files(item: QueryParam):
                       item.searchValue, item.currentClass,
                       item.phylogenyFilters, 'download')
 
-    csv_data = create_data_files_csv(data['results'], item.downloadOption, item.indexName)
+    csv_data = create_data_files_csv(data['results'], item.downloadOption,
+                                     item.indexName)
 
     # Return the byte stream as a downloadable CSV file
     return StreamingResponse(
@@ -550,19 +606,29 @@ async def get_data_files(item: QueryParam):
 def create_data_files_csv(results, download_option, index_name):
     header = []
     if download_option.lower() == "assemblies":
-        header = ["Scientific Name", "Accession", "Version", "Assembly Name", "Assembly Description",
+        header = ["Scientific Name", "Accession", "Version", "Assembly Name",
+                  "Assembly Description",
                   "Link to chromosomes, contigs and scaffolds all in one"]
     elif download_option.lower() == "annotation":
-        header = ["Annotation GTF", "Annotation GFF3", "Proteins Fasta", "Transcripts Fasta",
+        header = ["Annotation GTF", "Annotation GFF3", "Proteins Fasta",
+                  "Transcripts Fasta",
                   "Softmasked genomes Fasta"]
     elif download_option.lower() == "raw_files":
-        header = ["Study Accession", "Sample Accession", "Experiment Accession", "Run Accession", "Tax Id",
-                  "Scientific Name", "FASTQ FTP", "Submitted FTP", "SRA FTP", "Library Construction Protocol"]
-    elif download_option.lower() == "metadata" and index_name == 'data_portal':
-        header = ['Organism', 'Common Name', 'Common Name Source', 'Current Status']
-    elif download_option.lower() == "metadata" and index_name == 'tracking_status':
-        header = ['Organism', 'Common Name', 'Metadata submitted to BioSamples', 'Raw data submitted to ENA',
-                  'Mapped reads submitted to ENA', 'Assemblies submitted to ENA',
+        header = ["Study Accession", "Sample Accession",
+                  "Experiment Accession", "Run Accession", "Tax Id",
+                  "Scientific Name", "FASTQ FTP", "Submitted FTP", "SRA FTP",
+                  "Library Construction Protocol"]
+    elif (download_option.lower() == "metadata" and index_name ==
+          'data_portal'):
+        header = ['Organism', 'Common Name', 'Common Name Source',
+                  'Current Status']
+    elif (download_option.lower() == "metadata" and index_name ==
+          'tracking_status'):
+        header = ['Organism', 'Common Name',
+                  'Metadata submitted to BioSamples',
+                  'Raw data submitted to ENA',
+                  'Mapped reads submitted to ENA',
+                  'Assemblies submitted to ENA',
                   'Annotation complete', 'Annotation submitted to ENA']
 
     output = io.StringIO()
@@ -579,8 +645,11 @@ def create_data_files_csv(results, download_option, index_name):
                 version = assembly.get("version", "-")
                 assembly_name = assembly.get("assembly_name", "")
                 assembly_description = assembly.get("description", "")
-                link = f"https://www.ebi.ac.uk/ena/browser/api/fasta/{accession}?download=true&gzip=true" if accession else ""
-                entry = [scientific_name, accession, version, assembly_name, assembly_description, link]
+                link = (f"https://www.ebi.ac.uk/ena/browser/api/fasta/"
+                        f"{accession}?download=true&gzip=true") \
+                    if accession else ""
+                entry = [scientific_name, accession, version, assembly_name,
+                         assembly_description, link]
                 csv_writer.writerow(entry)
 
         elif download_option.lower() == "annotation":
@@ -589,10 +658,14 @@ def create_data_files_csv(results, download_option, index_name):
             for annotation in annotations:
                 gtf = annotation.get("annotation", {}).get("GTF", "-")
                 gff3 = annotation.get("annotation", {}).get("GFF3", "-")
-                proteins_fasta = annotation.get("proteins", {}).get("FASTA", "")
-                transcripts_fasta = annotation.get("transcripts", {}).get("FASTA", "")
-                softmasked_genomes_fasta = annotation.get("softmasked_genome", {}).get("FASTA", "")
-                entry = [gtf, gff3, proteins_fasta, transcripts_fasta, softmasked_genomes_fasta]
+                proteins_fasta = annotation.get("proteins", {}).get("FASTA",
+                                                                    "")
+                transcripts_fasta = annotation.get("transcripts", {}).get(
+                    "FASTA", "")
+                softmasked_genomes_fasta = annotation.get("softmasked_genome",
+                                                          {}).get("FASTA", "")
+                entry = [gtf, gff3, proteins_fasta, transcripts_fasta,
+                         softmasked_genomes_fasta]
                 csv_writer.writerow(entry)
 
         elif download_option.lower() == "raw_files":
@@ -600,24 +673,30 @@ def create_data_files_csv(results, download_option, index_name):
             for experiment in experiments:
                 study_accession = experiment.get("study_accession", "")
                 sample_accession = experiment.get("sample_accession", "")
-                experiment_accession = experiment.get("experiment_accession", "")
+                experiment_accession = experiment.get("experiment_accession",
+                                                      "")
                 run_accession = experiment.get("run_accession", "")
                 tax_id = experiment.get("tax_id", "")
                 scientific_name = experiment.get("scientific_name", "")
                 submitted_ftp = experiment.get("submitted_ftp", "")
                 sra_ftp = experiment.get("sra-ftp", "")
-                library_construction_protocol = experiment.get("library_construction_protocol", "")
+                library_construction_protocol = experiment.get(
+                    "library_construction_protocol", "")
                 fastq_ftp = experiment.get("fastq_ftp", "")
 
                 if fastq_ftp:
                     fastq_list = fastq_ftp.split(";")
                     for fastq in fastq_list:
-                        entry = [study_accession, sample_accession, experiment_accession, run_accession, tax_id,
-                                 scientific_name, fastq, submitted_ftp, sra_ftp, library_construction_protocol]
+                        entry = [study_accession, sample_accession,
+                                 experiment_accession, run_accession, tax_id,
+                                 scientific_name, fastq, submitted_ftp,
+                                 sra_ftp, library_construction_protocol]
                         csv_writer.writerow(entry)
                 else:
-                    entry = [study_accession, sample_accession, experiment_accession, run_accession, tax_id,
-                             scientific_name, fastq_ftp, submitted_ftp, sra_ftp, library_construction_protocol]
+                    entry = [study_accession, sample_accession,
+                             experiment_accession, run_accession, tax_id,
+                             scientific_name, fastq_ftp, submitted_ftp,
+                             sra_ftp, library_construction_protocol]
                     csv_writer.writerow(entry)
 
         elif download_option.lower() == "metadata" and index_name == 'data_portal':
@@ -628,7 +707,8 @@ def create_data_files_csv(results, download_option, index_name):
             entry = [organism, common_name, common_name_source, current_status]
             csv_writer.writerow(entry)
 
-        elif download_option.lower() == "metadata" and index_name == 'tracking_status':
+        elif (download_option.lower() == "metadata" and index_name ==
+              'tracking_status'):
             organism = record.get('organism', '')
             common_name = record.get('commonName', '')
             metadata_biosamples = record.get('biosamples', '')
@@ -637,7 +717,8 @@ def create_data_files_csv(results, download_option, index_name):
             assemblies_ena = record.get('assemblies_status', '')
             annotation_complete = record.get('annotation_complete', '')
             annotation_submitted_ena = record.get('annotation_status', '')
-            entry = [organism, common_name, metadata_biosamples, raw_data_ena, mapped_reads_ena, assemblies_ena,
+            entry = [organism, common_name, metadata_biosamples, raw_data_ena,
+                     mapped_reads_ena, assemblies_ena,
                      annotation_complete, annotation_submitted_ena]
             csv_writer.writerow(entry)
 
