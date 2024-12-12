@@ -19,15 +19,9 @@ origins = [
     "*"
 ]
 
-# ES_HOST = os.getenv('ES_CONNECTION_URL')
-#
-# ES_USERNAME = os.getenv('ES_USERNAME')
-#
-# ES_PASSWORD = os.getenv('ES_PASSWORD')
-
-ES_HOST = 'https://prj-ext-dev-asg-gcp-dr-349815.es.europe-west2.gcp.elastic-cloud.com'
-ES_USERNAME = 'elastic'
-ES_PASSWORD = 'EAbKkM0E4Se8GfVgwxtKW6h0'
+ES_HOST = os.getenv('ES_CONNECTION_URL')
+ES_USERNAME = os.getenv('ES_USERNAME')
+ES_PASSWORD = os.getenv('ES_PASSWORD')
 
 app.add_middleware(
     CORSMiddleware,
