@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import io
 import os
+import httpx
 
 
 
@@ -684,3 +685,18 @@ def create_data_files_csv(results, download_option, index_name):
 
     output.seek(0)
     return io.BytesIO(output.getvalue().encode('utf-8'))
+
+
+@app.get("/api/metagenomics/{study_id}/downloads")
+async def get_mgnify_metagenomics(study_id):
+    mgnify_metagenomics_url = "https://www.ebi.ac.uk/metagenomics/api/v1"
+    url = f"{mgnify_metagenomics_url}/studies/{study_id}/downloads"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
