@@ -502,33 +502,68 @@ async def details(index: str, record_id: str):
                 ]
             }
         }
-        body["aggregations"] = {
-            'filters': {
-                'nested': {
-                    'path': 'records'
-                },
-                "aggs": {
-                    'sex_filter': {
-                        'terms': {
-                            'field': 'records.sex',
-                            'size': 2000
-                        }
-                    },
-                    'tracking_status_filter': {
-                        'terms': {
-                            'field': 'records''.trackingSystem',
-                            'size': 2000
-                        }
-                    },
-                    'organism_part_filter': {
-                        'terms': {
-                            'field': 'records''.organismPart',
-                            'size': 2000
-                        }
-                    }
-                }
-            }
-        }
+        body["aggs"] = dict()
+        body["aggs"]["metadata_filters"] = {
+            'nested': {'path': 'records'},
+            "aggs": {
+                'sex_filter': {
+                    'terms': {
+                        'field':
+                            'records.sex.keyword',
+                        'size': 2000}},
+                'tracking_status_filter': {
+                    'terms': {
+                        'field':
+                            'records.'
+                            'trackingSystem.keyword',
+                        'size': 2000}},
+                'organism_part_filter': {
+                    'terms': {
+                        'field': 'records'
+                                 '.organismPart.keyword',
+                        'size': 2000}}
+            }}
+        body["aggs"]["symbionts_filters"] = {
+            'nested': {'path': 'symbionts_records'},
+            "aggs": {
+                'sex_filter': {
+                    'terms': {
+                        'field':
+                            'symbionts_records.sex.keyword',
+                        'size': 2000}},
+                'tracking_status_filter': {
+                    'terms': {
+                        'field':
+                            'symbionts_records.'
+                            'trackingSystem.keyword',
+                        'size': 2000}},
+                'organism_part_filter': {
+                    'terms': {
+                        'field': 'symbionts_records'
+                                 '.organismPart.keyword',
+                        'size': 2000}}
+            }}
+        body['aggs']['metagenomes_filters'] = {
+            'nested': {'path': 'metagenomes_records'},
+            "aggs": {
+                'sex_filter': {
+                    'terms': {
+                        'field':
+                            'metagenomes_records.sex.keyword',
+                        'size': 2000}},
+                'tracking_status_filter': {
+                    'terms': {
+                        'field':
+                            'metagenomes_records.'
+                            'trackingSystem.keyword',
+                        'size': 2000}},
+                'organism_part_filter': {
+                    'terms': {
+                        'field': 'metagenomes_records'
+                                 '.organismPart.keyword',
+                        'size': 2000}}
+            }}
+
         response = await es.search(index=index, body=body)
         aggregations = response['aggregations']
     else:
