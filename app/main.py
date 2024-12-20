@@ -33,7 +33,9 @@ app.add_middleware(
 )
 
 es = AsyncElasticsearch(
-    [ES_HOST], connection_class=AIOHttpConnection,
+    [ES_HOST],
+    timeout=30,
+    connection_class=AIOHttpConnection,
     http_auth=(ES_USERNAME, ES_PASSWORD),
     use_ssl=True, verify_certs=True)
 
@@ -624,7 +626,7 @@ def create_data_files_csv(results, download_option, index_name):
     elif download_option.lower() == "metadata" and index_name in ['data_portal', 'data_portal_test']:
         header = ['Organism', 'Common Name', 'Common Name Source',
                   'Current Status']
-    elif download_option.lower() == "metadata" and index_name == 'tracking_status':
+    elif download_option.lower() == "metadata" and index_name in ['tracking_status', 'tracking_status_index_test']:
         header = ['Organism', 'Common Name', 'Metadata submitted to BioSamples',
                   'Raw data submitted to ENA',
                   'Mapped reads submitted to ENA',
@@ -704,7 +706,7 @@ def create_data_files_csv(results, download_option, index_name):
             entry = [organism, common_name, common_name_source, current_status]
             csv_writer.writerow(entry)
 
-        elif download_option.lower() == "metadata" and index_name == 'tracking_status':
+        elif download_option.lower() == "metadata" and index_name in ['tracking_status', 'tracking_status_index_test']:
             organism = record.get('organism', '')
             common_name = record.get('commonName', '')
             metadata_biosamples = record.get('biosamples', '')
