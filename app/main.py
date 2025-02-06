@@ -299,6 +299,48 @@ async def get_filters():
     })
     return result
 
+@app.get("/articles")
+async def articles(offset: int = 0, limit: int = 15,
+                   articleType: str = None,
+                   journalTitle: str = None, pubYear: str = None):
+    body = dict()
+    data_index = 'articles'
+    # Aggregations
+    body["aggs"] = dict()
+    body["aggs"]['journalTitle'] = {
+        "terms": {"field": "journalTitle"}
+    }
+    body["aggs"]['pubYear'] = {
+        "terms": {"field": "pubYear"}
+    }
+    body["aggs"]["articleType"] = {
+        "terms": {"field": "articleType"}
+    }
+
+    # Filters
+    if articleType or journalTitle or pubYear:
+        body["query"] = {
+            "bool": {
+                "filter": list()
+            }
+        }
+    if articleType:
+        body["query"]["bool"]["filter"].append(
+            {"term": {'articleType': articleType}})
+    if journalTitle:
+        body["query"]["bool"]["filter"].append(
+            {"term": {'journalTitle': journalTitle}})
+    if pubYear:
+        body["query"]["bool"]["filter"].append({"term": {'pubYear': pubYear}})
+    print(body)
+    response = await es.search(index=data_index, from_=offset, size=limit,
+                               body=body)
+    data = dict()
+    data['count'] = response['hits']['total']['value']
+    data['results'] = response['hits']['hits']
+    data['aggregations'] = response['aggregations']
+    return data
+
 
 @app.get("/{index}")
 async def root(index: str, offset: int = 0, limit: int = 15,
