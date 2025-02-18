@@ -1,17 +1,17 @@
 import csv
-import re
-from elasticsearch import AsyncElasticsearch, AIOHttpConnection
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import io
-import os
+import re
+from http.client import HTTPException
+
 import httpx
+from elasticsearch import AsyncElasticsearch, AIOHttpConnection, \
+    ConnectionTimeout
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
-
-
-from .constants import DATA_PORTAL_AGGREGATIONS
+from .constants import DATA_PORTAL_AGGREGATIONS, ARTICLES_AGGREGATIONS
 
 app = FastAPI()
 
@@ -24,6 +24,8 @@ ES_HOST = os.getenv('ES_CONNECTION_URL')
 ES_USERNAME = os.getenv('ES_USERNAME')
 
 ES_PASSWORD = os.getenv('ES_PASSWORD')
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -299,48 +301,6 @@ async def get_filters():
     })
     return result
 
-@app.get("/articles")
-async def articles(offset: int = 0, limit: int = 15,
-                   articleType: str = None,
-                   journalTitle: str = None, pubYear: str = None):
-    body = dict()
-    data_index = 'articles'
-    # Aggregations
-    body["aggs"] = dict()
-    body["aggs"]['journalTitle'] = {
-        "terms": {"field": "journalTitle"}
-    }
-    body["aggs"]['pubYear'] = {
-        "terms": {"field": "pubYear"}
-    }
-    body["aggs"]["articleType"] = {
-        "terms": {"field": "articleType"}
-    }
-
-    # Filters
-    if articleType or journalTitle or pubYear:
-        body["query"] = {
-            "bool": {
-                "filter": list()
-            }
-        }
-    if articleType:
-        body["query"]["bool"]["filter"].append(
-            {"term": {'articleType': articleType}})
-    if journalTitle:
-        body["query"]["bool"]["filter"].append(
-            {"term": {'journalTitle': journalTitle}})
-    if pubYear:
-        body["query"]["bool"]["filter"].append({"term": {'pubYear': pubYear}})
-    print(body)
-    response = await es.search(index=data_index, from_=offset, size=limit,
-                               body=body)
-    data = dict()
-    data['count'] = response['hits']['total']['value']
-    data['results'] = response['hits']['hits']
-    data['aggregations'] = response['aggregations']
-    return data
-
 
 @app.get("/{index}")
 async def root(index: str, offset: int = 0, limit: int = 15,
@@ -355,8 +315,12 @@ async def root(index: str, offset: int = 0, limit: int = 15,
     body = dict()
     # building aggregations for every request
     body["aggs"] = dict()
+    if 'articles' in index:
+        aggregations_list = ARTICLES_AGGREGATIONS
+    else:
+        aggregations_list = DATA_PORTAL_AGGREGATIONS
 
-    for aggregation_field in DATA_PORTAL_AGGREGATIONS:
+    for aggregation_field in aggregations_list:
         body["aggs"][aggregation_field] = {
             "terms": {"field": aggregation_field + '.keyword'}
         }
@@ -481,22 +445,34 @@ async def root(index: str, offset: int = 0, limit: int = 15,
     if search:
         if "query" not in body:
             body["query"] = {"bool": {"must": {"bool": {"should": []}}}}
-        elif "must" not in body["query"]["bool"]:
-            body["query"]["bool"]["must"] = {"bool": {"should": []}}
+        else:
+            body["query"]["bool"].setdefault("must", {"bool":
+                                                          {"should": []}})
 
-        search_fields = [
-            "organism",
-            "commonName",
-            "symbionts_records.organism.text",
-            "metagenomes_records.organism.text"
-        ]
+        search_fields = (
+            ["title", "journal_name", "study_id", "organism_name"]
+            if 'articles' in index
+            else ["organism", "commonName", "symbionts_records.organism.text",
+                  "metagenomes_records.organism.text"]
+        )
+
+        for field in search_fields:
+            body["query"]["bool"]["must"]["bool"]["should"].append({
+                "wildcard": {
+                    field: {
+                        "value": f"*{search}*",
+                        "case_insensitive": True
+                    }
+                }
+            })
 
         wildcard_queries = [
             {"wildcard": {
                 field: {"value": f"*{search}*", "case_insensitive": True}}}
             for field in search_fields
         ]
-        body["query"]["bool"]["must"]["bool"]["should"].extend(wildcard_queries)
+        body["query"]["bool"]["must"]["bool"]["should"].extend(
+            wildcard_queries)
 
         if index == "gis_filter_data":
             # generate nested query for organisms.organism
@@ -513,11 +489,15 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                     }
                 }
             }
-            body["query"]["bool"]["must"]["bool"]["should"].append(nested_query)
+            body["query"]["bool"]["must"]["bool"]["should"].append(
+                nested_query)
 
     if action == 'download':
-        response = await es.search(index=index, sort=sort, from_=offset,
-                                   body=body, size=50000)
+        try:
+            response = await es.search(index=index, sort=sort, from_=offset,
+                                       body=body, size=10000)
+        except ConnectionTimeout:
+            return {"error": "Request to Elasticsearch timed out."}
     else:
         response = await es.search(index=index, sort=sort, from_=offset,
                                    size=limit, body=body)
@@ -659,15 +639,18 @@ def create_data_files_csv(results, download_option, index_name):
                   "Transcripts Fasta",
                   "Softmasked genomes Fasta"]
     elif download_option.lower() == "raw_files":
-        header = ["Study Accession", "Sample Accession", "Experiment Accession",
+        header = ["Study Accession", "Sample Accession",
+                  "Experiment Accession",
                   "Run Accession", "Tax Id",
                   "Scientific Name", "FASTQ FTP", "Submitted FTP", "SRA FTP",
                   "Library Construction Protocol"]
-    elif download_option.lower() == "metadata" and index_name in ['data_portal', 'data_portal_test']:
+    elif download_option.lower() == "metadata" and index_name in [
+        'data_portal', 'data_portal_test']:
         header = ['Organism', 'Common Name', 'Common Name Source',
                   'Current Status']
     elif download_option.lower() == "metadata" and index_name == 'tracking_status':
-        header = ['Organism', 'Common Name', 'Metadata submitted to BioSamples',
+        header = ['Organism', 'Common Name',
+                  'Metadata submitted to BioSamples',
                   'Raw data submitted to ENA',
                   'Mapped reads submitted to ENA',
                   'Assemblies submitted to ENA',
@@ -698,7 +681,8 @@ def create_data_files_csv(results, download_option, index_name):
             for annotation in annotations:
                 gtf = annotation.get("annotation", {}).get("GTF", "-")
                 gff3 = annotation.get("annotation", {}).get("GFF3", "-")
-                proteins_fasta = annotation.get("proteins", {}).get("FASTA", "")
+                proteins_fasta = annotation.get("proteins", {}).get("FASTA",
+                                                                    "")
                 transcripts_fasta = annotation.get("transcripts", {}).get(
                     "FASTA", "")
                 softmasked_genomes_fasta = annotation.get("softmasked_genome",
@@ -728,17 +712,20 @@ def create_data_files_csv(results, download_option, index_name):
                     for fastq in fastq_list:
                         entry = [study_accession, sample_accession,
                                  experiment_accession, run_accession, tax_id,
-                                 scientific_name, fastq, submitted_ftp, sra_ftp,
+                                 scientific_name, fastq, submitted_ftp,
+                                 sra_ftp,
                                  library_construction_protocol]
                         csv_writer.writerow(entry)
                 else:
                     entry = [study_accession, sample_accession,
                              experiment_accession, run_accession, tax_id,
-                             scientific_name, fastq_ftp, submitted_ftp, sra_ftp,
+                             scientific_name, fastq_ftp, submitted_ftp,
+                             sra_ftp,
                              library_construction_protocol]
                     csv_writer.writerow(entry)
 
-        elif download_option.lower() == "metadata" and index_name in ['data_portal', 'data_portal_test']:
+        elif download_option.lower() == "metadata" and index_name in [
+            'data_portal', 'data_portal_test']:
             organism = record.get('organism', '')
             common_name = record.get('commonName', '')
             common_name_source = record.get('commonNameSource', '')
@@ -774,6 +761,8 @@ async def get_mgnify_metagenomics(study_id):
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as exc:
-            raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+            raise HTTPException(status_code=exc.response.status_code,
+                                detail=exc.response.text)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+            raise HTTPException(status_code=500,
+                                detail=f"An error occurred: {str(e)}")
