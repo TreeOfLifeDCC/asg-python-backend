@@ -2,7 +2,7 @@ import csv
 import io
 import re
 from http.client import HTTPException
-
+import os
 import httpx
 from elasticsearch import AsyncElasticsearch, AIOHttpConnection, \
     ConnectionTimeout
