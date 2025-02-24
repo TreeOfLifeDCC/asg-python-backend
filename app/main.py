@@ -25,7 +25,6 @@ ES_USERNAME = os.getenv('ES_USERNAME')
 
 ES_PASSWORD = os.getenv('ES_PASSWORD')
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -734,7 +733,8 @@ def create_data_files_csv(results, download_option, index_name):
             entry = [organism, common_name, common_name_source, current_status]
             csv_writer.writerow(entry)
 
-        elif download_option.lower() == "metadata" and index_name in ['tracking_status', 'tracking_status_index_test']:
+        elif download_option.lower() == "metadata" and index_name in [
+            'tracking_status', 'tracking_status_index_test']:
             organism = record.get('organism', '')
             common_name = record.get('commonName', '')
             metadata_biosamples = record.get('biosamples', '')
