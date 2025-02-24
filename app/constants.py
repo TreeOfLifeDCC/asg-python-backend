@@ -4,3 +4,4 @@ DATA_PORTAL_AGGREGATIONS = [
     "symbionts_assemblies_status", "symbionts_biosamples_status", "symbionts_raw_data_status",
     "metagenomes_assemblies_status", "metagenomes_biosamples_status", "metagenomes_raw_data_status",
     "mgnify_status"]
+ARTICLES_AGGREGATIONS = ["pubYear", "journalTitle", "articleType"]
