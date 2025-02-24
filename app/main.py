@@ -647,10 +647,10 @@ def create_data_files_csv(results, download_option, index_name):
         header = ['Organism', 'Common Name', 'Common Name Source',
                   'Current Status']
 
-    elif download_option.lower() == "metadata" and index_name == 'tracking_status':
+    elif download_option.lower() == "metadata" and index_name in [
+        'tracking_status','tracking_status_index_test']:
         header = ['Organism', 'Common Name',
                   'Metadata submitted to BioSamples',
-
                   'Raw data submitted to ENA',
                   'Mapped reads submitted to ENA',
                   'Assemblies submitted to ENA',
