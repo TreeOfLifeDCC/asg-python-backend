@@ -343,8 +343,7 @@ async def root(index: str, offset: int = 0, limit: int = 15,
     body["aggs"]["genome"] = {
         "nested": {"path": "genome_notes"},
         "aggs": {"genome_count": {"cardinality": {"field": "genome_notes.id"}
-                                  }
-                 }
+                                  }}
 
     }
     if phylogeny_filters:
@@ -387,7 +386,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
         for filter_item in filters:
             if current_class in filter_item:
                 _, value = filter_item.split(":")
-
                 nested_dict = {
                     "nested": {
                         "path": f"taxonomies.{current_class}",
@@ -409,7 +407,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
 
             else:
                 filter_name, filter_value = filter_item.split(":")
-
                 if filter_name == 'experimentType':
                     nested_dict = {
                         "nested": {
@@ -495,7 +492,7 @@ async def root(index: str, offset: int = 0, limit: int = 15,
     if action == 'download':
         try:
             response = await es.search(index=index, sort=sort, from_=offset,
-                                       body=body, size=10000)
+                                       body=body, size=50000)
         except ConnectionTimeout:
             return {"error": "Request to Elasticsearch timed out."}
     else:
