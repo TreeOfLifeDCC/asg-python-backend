@@ -428,6 +428,9 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                         }
                     }
                     body["query"]["bool"]["filter"].append(nested_dict)
+                elif filter_name == 'asg_species_group':
+                    body["query"]["bool"]["filter"].append(
+                        {"term": {filter_name + '.keyword': filter_value}})
                 elif filter_name == 'genome_notes':
                     nested_dict = {
                         'nested': {'path': 'genome_notes', 'query': {
@@ -491,7 +494,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
             }
             body["query"]["bool"]["must"]["bool"]["should"].append(
                 nested_query)
-
     if action == 'download':
         try:
             response = await es.search(index=index, sort=sort, from_=offset,
