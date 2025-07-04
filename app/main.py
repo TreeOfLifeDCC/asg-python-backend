@@ -324,9 +324,14 @@ async def root(index: str, offset: int = 0, limit: int = 15,
         aggregations_list = DATA_PORTAL_AGGREGATIONS
 
     for aggregation_field in aggregations_list:
-        body["aggs"][aggregation_field] = {
-            "terms": {"field": aggregation_field + '.keyword'}
-        }
+        if aggregation_field == 'asg_species_group':
+            body["aggs"][aggregation_field] = {
+                "terms": {"field": aggregation_field}
+            }
+        else:
+            body["aggs"][aggregation_field] = {
+                "terms": {"field": aggregation_field + '.keyword'}
+            }
     body["aggs"]["taxonomies"] = {
         "nested": {"path": f"taxonomies.{current_class}"},
         "aggs": {current_class: {
@@ -428,9 +433,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                         }
                     }
                     body["query"]["bool"]["filter"].append(nested_dict)
-                elif filter_name == 'asg_species_group':
-                    body["query"]["bool"]["filter"].append(
-                        {"term": {filter_name + '.keyword': filter_value}})
                 elif filter_name == 'genome_notes':
                     nested_dict = {
                         'nested': {'path': 'genome_notes', 'query': {
