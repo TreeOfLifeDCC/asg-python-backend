@@ -324,9 +324,14 @@ async def root(index: str, offset: int = 0, limit: int = 15,
         aggregations_list = DATA_PORTAL_AGGREGATIONS
 
     for aggregation_field in aggregations_list:
-        body["aggs"][aggregation_field] = {
-            "terms": {"field": aggregation_field + '.keyword'}
-        }
+        if aggregation_field == 'asg_species_group':
+            body["aggs"][aggregation_field] = {
+                "terms": {"field": aggregation_field}
+            }
+        else:
+            body["aggs"][aggregation_field] = {
+                "terms": {"field": aggregation_field + '.keyword'}
+            }
     body["aggs"]["taxonomies"] = {
         "nested": {"path": f"taxonomies.{current_class}"},
         "aggs": {current_class: {
@@ -491,7 +496,6 @@ async def root(index: str, offset: int = 0, limit: int = 15,
             }
             body["query"]["bool"]["must"]["bool"]["should"].append(
                 nested_query)
-
     if action == 'download':
         try:
             response = await es.search(index=index, sort=sort, from_=offset,
