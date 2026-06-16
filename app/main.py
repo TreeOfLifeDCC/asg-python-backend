@@ -1,12 +1,11 @@
 import csv
 import io
 import re
-from http.client import HTTPException
 import os
 import httpx
 from elasticsearch import AsyncElasticsearch, AIOHttpConnection, \
     ConnectionTimeout
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -16,8 +15,13 @@ from .constants import DATA_PORTAL_AGGREGATIONS, ARTICLES_AGGREGATIONS
 
 app = FastAPI()
 
+# Allowed CORS origins. The service has no cookie/session auth, so credentials
+# are disabled; a wildcard origin is therefore safe. Override with a
+# comma-separated CORS_ALLOWED_ORIGINS to lock the API to specific front-ends.
 origins = [
-    "*"
+    origin.strip()
+    for origin in os.getenv('CORS_ALLOWED_ORIGINS', '*').split(',')
+    if origin.strip()
 ]
 
 
@@ -27,10 +31,48 @@ ES_USERNAME = os.getenv('ES_USERNAME')
 
 ES_PASSWORD = os.getenv('ES_PASSWORD')
 
+# Allowlist of Elasticsearch indices that may be queried through the public
+# API. The index name is attacker-controlled (path segment), so it must be
+# validated before it ever reaches es.search(). Override via the
+# ALLOWED_INDICES environment variable (comma-separated) when new indices are
+# added, instead of removing this guard.
+# Index names the frontend requests through the catch-all routes
+# (asg-frontend dashboard/tracking/gis/publications services). The /summary
+# route has its own handler and does not pass through this allowlist.
+DEFAULT_ALLOWED_INDICES = {
+    "data_portal", "data_portal_test",
+    "tracking_status", "tracking_status_index_test",
+    "gis_filter_data",
+    "articles",
+}
+ALLOWED_INDICES = {
+    index.strip()
+    for index in os.getenv(
+        'ALLOWED_INDICES', ','.join(sorted(DEFAULT_ALLOWED_INDICES))
+    ).split(',')
+    if index.strip()
+}
+
+# Upper bound on the number of hits a single request may pull from
+# Elasticsearch, to prevent unauthenticated resource exhaustion.
+MAX_PAGE_SIZE = 10000
+
+# MGnify study identifiers are short alphanumeric accessions (e.g.
+# "MGYS00000001"); restrict to a safe charset so the value cannot manipulate
+# the outbound request path.
+STUDY_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+
+
+def require_allowed_index(index: str) -> None:
+    """Reject any index that is not on the allowlist."""
+    if index not in ALLOWED_INDICES:
+        raise HTTPException(status_code=404, detail="Unknown index")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -47,14 +89,16 @@ es = AsyncElasticsearch(
 async def downloader_utility_data(taxonomy_filter: str, data_status: str,
                                   experiment_type: str, project_name: str):
     body = dict()
+    # Always initialise the query container so later filter blocks can append
+    # to it regardless of which optional parameters were supplied.
+    body["query"] = {
+        "bool": {
+            "filter": list()
+        }
+    }
     if taxonomy_filter != '':
 
         if taxonomy_filter:
-            body["query"] = {
-                "bool": {
-                    "filter": list()
-                }
-            }
             nested_dict = {
                 "nested": {
                     "path": "taxonomies.class",
@@ -76,25 +120,28 @@ async def downloader_utility_data(taxonomy_filter: str, data_status: str,
 
     if data_status is not None and data_status != '':
         split_array = data_status.split("-")
-        if split_array and split_array[0].strip() == 'Biosamples':
+        # term-based status filters require a "Label-Value" shape; skip them
+        # if the value segment is missing rather than raising IndexError.
+        has_value = len(split_array) > 1
+        if has_value and split_array[0].strip() == 'Biosamples':
             body["query"]["bool"]["filter"].append(
                 {"term": {'biosamples': split_array[1].strip()}}
             )
-        elif split_array and split_array[0].strip() == 'Raw Data':
+        elif has_value and split_array[0].strip() == 'Raw Data':
             body["query"]["bool"]["filter"].append(
                 {"term": {'raw_data': split_array[1].strip()}}
             )
-        elif split_array and split_array[0].strip() == 'Mapped Reads':
+        elif has_value and split_array[0].strip() == 'Mapped Reads':
             body["query"]["bool"]["filter"].append(
                 {"term": {'mapped_reads': split_array[1].strip()}})
 
-        elif split_array and split_array[0].strip() == 'Assemblies':
+        elif has_value and split_array[0].strip() == 'Assemblies':
             body["query"]["bool"]["filter"].append(
                 {"term": {'assemblies_status': split_array[1].strip()}})
-        elif split_array and split_array[0].strip() == 'Annotation Complete':
+        elif has_value and split_array[0].strip() == 'Annotation Complete':
             body["query"]["bool"]["filter"].append(
                 {"term": {'annotation_complete': split_array[1].strip()}})
-        elif split_array and split_array[0].strip() == 'Annotation':
+        elif has_value and split_array[0].strip() == 'Annotation':
             body["query"]["bool"]["filter"].append(
                 {"term": {'annotation_status': split_array[1].strip()}})
         elif split_array and split_array[0].strip() == 'Genome Notes':
@@ -193,6 +240,10 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                phylogeny_filters: str = None, action: str = None):
     if index == 'favicon.ico':
         return None
+    require_allowed_index(index)
+    # clamp paging parameters to prevent unauthenticated resource exhaustion
+    offset = max(offset, 0)
+    limit = min(max(limit, 0), MAX_PAGE_SIZE)
     global value
     print(phylogeny_filters)
     # data structure for ES query
@@ -244,7 +295,11 @@ async def root(index: str, offset: int = 0, limit: int = 15,
         phylogeny_filters = phylogeny_filters.split("-")
         print(phylogeny_filters)
         for phylogeny_filter in phylogeny_filters:
-            name, value = phylogeny_filter.split(":")
+            if ":" not in phylogeny_filter:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Malformed phylogeny_filters parameter")
+            name, value = phylogeny_filter.split(":", 1)
             nested_dict = {
                 "nested": {
                     "path": f"taxonomies.{name}",
@@ -273,8 +328,11 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                 }
             }
         for filter_item in filters:
+            if ":" not in filter_item:
+                raise HTTPException(
+                    status_code=400, detail="Malformed filter parameter")
             if current_class in filter_item:
-                _, value = filter_item.split(":")
+                _, value = filter_item.split(":", 1)
                 nested_dict = {
                     "nested": {
                         "path": f"taxonomies.{current_class}",
@@ -295,7 +353,7 @@ async def root(index: str, offset: int = 0, limit: int = 15,
                 body["query"]["bool"]["filter"].append(nested_dict)
 
             else:
-                filter_name, filter_value = filter_item.split(":")
+                filter_name, filter_value = filter_item.split(":", 1)
                 if filter_name == 'experimentType':
                     nested_dict = {
                         "nested": {
@@ -396,6 +454,7 @@ async def root(index: str, offset: int = 0, limit: int = 15,
 
 @app.get("/{index}/{record_id}")
 async def details(index: str, record_id: str):
+    require_allowed_index(index)
     body = dict()
     if index in ['data_portal', 'data_portal_test']:
         body["query"] = {
@@ -474,7 +533,11 @@ async def details(index: str, record_id: str):
         response = await es.search(index=index, body=body)
         aggregations = response['aggregations']
     else:
-        response = await es.search(index=index, q=f"_id:{record_id}")
+        # Use a parameterized term query rather than interpolating user input
+        # into a Lucene query string (avoids query-string injection).
+        response = await es.search(
+            index=index,
+            body={"query": {"term": {"_id": record_id}}})
     data = dict()
     data['count'] = response['hits']['total']['value']
     data['results'] = response['hits']['hits']
@@ -668,7 +731,9 @@ def create_data_files_csv(results, download_option, index_name):
 
 
 @app.get("/api/metagenomics/{study_id}/downloads")
-async def get_mgnify_metagenomics(study_id):
+async def get_mgnify_metagenomics(study_id: str):
+    if not STUDY_ID_PATTERN.match(study_id):
+        raise HTTPException(status_code=400, detail="Invalid study id")
     mgnify_metagenomics_url = "https://www.ebi.ac.uk/metagenomics/api/v1"
     url = f"{mgnify_metagenomics_url}/studies/{study_id}/downloads"
     async with httpx.AsyncClient() as client:
@@ -678,7 +743,7 @@ async def get_mgnify_metagenomics(study_id):
             return response.json()
         except httpx.HTTPStatusError as exc:
             raise HTTPException(status_code=exc.response.status_code,
-                                detail=exc.response.text)
-        except Exception as e:
-            raise HTTPException(status_code=500,
-                                detail=f"An error occurred: {str(e)}")
+                                detail="Upstream request failed")
+        except Exception:
+            raise HTTPException(status_code=502,
+                                detail="Error contacting MGnify service")
